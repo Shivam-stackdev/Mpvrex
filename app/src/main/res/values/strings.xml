@@ -1342,4 +1342,6 @@
     <string name="filter_preset_deep_black">Deep Black</string>
     <string name="filter_preset_deep_black_desc">Enhanced blacks for OLED displays</string>
 
+    <string name="home_continue_watching">Continue Watching</string>
+    <string name="home_recently_added">Recently Added</string>
 </resources>

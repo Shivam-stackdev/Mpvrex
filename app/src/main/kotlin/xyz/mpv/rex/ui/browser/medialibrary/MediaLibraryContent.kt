@@ -11,14 +11,22 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateTopPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileOpen
@@ -52,6 +60,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import xyz.mpv.rex.ui.browser.sheets.PlayLinkSheet
+import xyz.mpv.rex.ui.browser.cards.VideoCard
+import xyz.mpv.rex.ui.browser.home.HomeViewModel
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -116,12 +126,17 @@ fun MediaLibraryContent() {
   val viewModel: MediaLibraryViewModel = viewModel(
     factory = MediaLibraryViewModel.factory(context.applicationContext as android.app.Application)
   )
+  val homeViewModel: HomeViewModel = viewModel(
+    factory = HomeViewModel.factory(context.applicationContext as android.app.Application)
+  )
   val videos by viewModel.videos.collectAsState()
   val videosWithPlaybackInfo by viewModel.videosWithPlaybackInfo.collectAsState()
   val isLoading by viewModel.isLoading.collectAsState()
   val uiSettings by viewModel.uiSettings.collectAsState()
   val recentlyPlayedFilePath by viewModel.recentlyPlayedFilePath.collectAsState()
   val recentlyPlayedFilePaths by viewModel.recentlyPlayedFilePaths.collectAsState()
+  val continueWatching by homeViewModel.continueWatching.collectAsState()
+  val recentlyAdded by homeViewModel.recentlyAdded.collectAsState()
 
   // Sorting
   val videoSortType by browserPreferences.videoSortType.collectAsState()
@@ -215,11 +230,13 @@ fun MediaLibraryContent() {
   }
 
   DisposableEffect(lifecycleOwner) {
-    val observer = LifecycleEventObserver { _, event ->
+        val observer = LifecycleEventObserver { _, event ->
       if (event == Lifecycle.Event.ON_RESUME) {
         viewModel.refresh(silent = true)
+        homeViewModel.refresh()
       }
     }
+
     lifecycleOwner.lifecycle.addObserver(observer)
     onDispose {
       lifecycleOwner.lifecycle.removeObserver(observer)
@@ -443,8 +460,19 @@ fun MediaLibraryContent() {
       sortedVideosWithInfo
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-      VideoListContent(
+    Column(modifier = Modifier.fillMaxSize()) {
+      if (!isSearching) {
+        HomeMediaRows(
+          continueWatching = continueWatching,
+          recentlyAdded = recentlyAdded,
+          uiSettings = uiSettings,
+          recentlyPlayedPaths = recentlyPlayedFilePaths,
+          onVideoClick = { video -> MediaUtils.playFile(video, context, "home_row") },
+          modifier = Modifier.padding(top = padding.calculateTopPadding()),
+        )
+      }
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        VideoListContent(
         folderId = "media_library",
         videosWithInfo = displayVideos,
         isLoading = isLoading && videos.isEmpty(),
@@ -465,12 +493,13 @@ fun MediaLibraryContent() {
         },
         onVideoLongClick = { video -> selectionManager.handleLongClick(video) },
         isFabVisible = isFabVisible,
-        modifier = Modifier.padding(padding),
+        modifier = Modifier.padding(horizontal = 0.dp),
         showFloatingBottomBar = showFloatingBottomBar,
         sortType = videoSortType,
         sortOrder = videoSortOrder,
-        searchQuery = if (isSearching) searchQuery else null,
-      )
+          searchQuery = if (isSearching) searchQuery else null,
+        )
+      }
 
       AnimatedVisibility(
         visible = showFloatingBottomBar,
@@ -582,4 +611,74 @@ fun MediaLibraryContent() {
       xyz.mpv.rex.ui.browser.sheets.MultiSelectionInfoSheet(count = count, totalBytes = bytes, totalDurationMs = duration, onDismiss = { multiSelectionInfo = null })
     }
   }
+}
+
+
+@Composable
+private fun HomeMediaRows(
+  continueWatching: List<VideoWithPlaybackInfo>,
+  recentlyAdded: List<VideoWithPlaybackInfo>,
+  uiSettings: xyz.mpv.rex.preferences.UiSettings,
+  recentlyPlayedPaths: List<String>,
+  onVideoClick: (Video) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .padding(bottom = 8.dp),
+  ) {
+    HomeMediaRow(
+      title = stringResource(R.string.home_continue_watching),
+      items = continueWatching,
+      uiSettings = uiSettings,
+      recentlyPlayedPaths = recentlyPlayedPaths,
+      onVideoClick = onVideoClick,
+    )
+    HomeMediaRow(
+      title = stringResource(R.string.home_recently_added),
+      items = recentlyAdded,
+      uiSettings = uiSettings,
+      recentlyPlayedPaths = recentlyPlayedPaths,
+      onVideoClick = onVideoClick,
+    )
+  }
+}
+
+@Composable
+private fun HomeMediaRow(
+  title: String,
+  items: List<VideoWithPlaybackInfo>,
+  uiSettings: xyz.mpv.rex.preferences.UiSettings,
+  recentlyPlayedPaths: List<String>,
+  onVideoClick: (Video) -> Unit,
+) {
+  if (items.isEmpty()) return
+
+  Text(
+    text = title,
+    style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+  )
+  LazyRow(
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    items(items, key = { it.video.path }) { item ->
+      VideoCard(
+        video = item.video,
+        onClick = { onVideoClick(item.video) },
+        uiSettings = uiSettings,
+        modifier = Modifier.width(180.dp),
+        isRecentlyPlayed = item.video.path in recentlyPlayedPaths,
+        progressPercentage = item.progressPercentage,
+        isOldAndUnplayed = item.isOldAndUnplayed,
+        isWatched = item.isWatched,
+        isNeverPlayed = item.isNeverPlayed,
+        isGridMode = true,
+        gridColumns = 1,
+      )
+    }
+  }
+  Spacer(modifier = Modifier.height(4.dp))
 }
